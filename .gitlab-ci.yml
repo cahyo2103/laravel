@@ -1,0 +1,54 @@
+stages:
+  - test
+  - performance
+  - deploy
+  - rollback
+
+variables:
+  APP_ENV: testing
+  MYSQL_DATABASE: laravel
+  MYSQL_USER: laravel
+  MYSQL_PASSWORD: secret
+
+unit_test:
+  stage: test
+  tags:
+    - runner-staging
+  script:
+    - composer install
+    - cp .env.example .env
+    - php artisan key:generate
+    - vendor/bin/phpunit --coverage-text --colors=never
+  artifacts:
+    reports:
+      junit: report.xml
+    expire_in: 1 week
+
+performance_test:
+  stage: performance
+  tags:
+    - runner-staging
+  script:
+    - php artisan serve --port=8000 &
+    - sleep 10
+    - ab -n 200 -c 20 http://127.0.0.1:8000/
+  allow_failure: false
+
+deploy_staging:
+  stage: deploy
+  tags:
+    - runner-staging
+  script:
+    - echo "Deploying to staging..."
+    - rsync -avz --exclude='.git' ./ user@staging-server:/var/www/laravel
+    - ssh user@staging-server "cd /var/www/laravel && composer install --no-dev && php artisan migrate --force"
+  when: on_success
+
+rollback:
+  stage: rollback
+  tags:
+    - runner-staging
+  script:
+    - echo "Pipeline gagal, rollback ke versi sebelumnya..."
+    - ssh user@staging-server "cd /var/www/laravel && git reset --hard HEAD~1 && php artisan migrate:rollback"
+  when: on_failure
